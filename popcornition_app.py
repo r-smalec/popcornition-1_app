@@ -60,9 +60,7 @@ class DRV8825:
 
 
 STEP_BATCH = 60
-# Terminal key-repeat intervals are often ~100-250 ms, so this timeout
-# must be longer to avoid accidental stop while the key is still held.
-KEY_RELEASE_TIMEOUT = 0.30
+KEY_RELEASE_TIMEOUT = 0.08
 MIN_STEP_DELAY = 0.0
 MAX_STEP_DELAY = 0.0035
 
@@ -163,11 +161,10 @@ def main(stdscr):
     robot = RobotController()
 
     curses.curs_set(0)
-    stdscr.nodelay(False)
-    stdscr.timeout(1)
+    stdscr.nodelay(True)
     stdscr.keypad(True)
 
-    stdscr.addstr(0, 0, "Robot control: hold arrow key to drive, q = quit")
+    stdscr.addstr(0, 0, "Robot control: arrow keys drive wheels, q = quit")
     stdscr.addstr(1, 0, "Up:    right->right, left->left")
     stdscr.addstr(2, 0, "Down:  right->left,  left->right")
     stdscr.addstr(3, 0, "Left:  both wheels left")
@@ -248,8 +245,7 @@ def main(stdscr):
                 )
 
             stdscr.refresh()
-            if active_motion is None:
-                time.sleep(0.001)
+            time.sleep(0.001)
     finally:
         robot.close()
 
