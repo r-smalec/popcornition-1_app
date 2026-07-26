@@ -69,6 +69,7 @@ class DRV8825:
 KEY_RELEASE_TIMEOUT = 0.08
 MIN_STEP_FREQUENCY = 120
 MAX_STEP_FREQUENCY = 2000
+RAMP_UP_SECONDS = 1.0
 
 
 def step_frequency_for_level(level):
@@ -157,6 +158,7 @@ def main(stdscr):
     step_frequency = step_frequency_for_level(speed_level)
     active_motion = None
     applied_state = None
+    motion_started_at = None
     last_motion_key_at = 0.0
     stdscr.addstr(8, 0, "Waiting for key... Speed level: 5")
     stdscr.refresh()
@@ -164,6 +166,7 @@ def main(stdscr):
     try:
         while True:
             key = stdscr.getch()
+            requested_motion = None
 
             if key == ord("q"):
                 break
@@ -178,17 +181,13 @@ def main(stdscr):
                     ),
                 )
             elif key == curses.KEY_UP:
-                active_motion = ("forward", "backward", "FORWARD")
-                last_motion_key_at = time.monotonic()
+                requested_motion = ("forward", "backward", "FORWARD")
             elif key == curses.KEY_DOWN:
-                active_motion = ("backward", "forward", "BACKWARD")
-                last_motion_key_at = time.monotonic()
+                requested_motion = ("backward", "forward", "BACKWARD")
             elif key == curses.KEY_LEFT:
-                active_motion = ("backward", "backward", "LEFT")
-                last_motion_key_at = time.monotonic()
+                requested_motion = ("backward", "backward", "LEFT")
             elif key == curses.KEY_RIGHT:
-                active_motion = ("forward", "forward", "RIGHT")
-                last_motion_key_at = time.monotonic()
+                requested_motion = ("forward", "forward", "RIGHT")
             elif key == -1:
                 if (
                     active_motion is not None
@@ -196,11 +195,25 @@ def main(stdscr):
                     > KEY_RELEASE_TIMEOUT
                 ):
                     active_motion = None
+                    motion_started_at = None
+
+            if requested_motion is not None:
+                if requested_motion != active_motion:
+                    active_motion = requested_motion
+                    motion_started_at = time.monotonic()
+                last_motion_key_at = time.monotonic()
+
+            if active_motion is None:
+                ramped_frequency = 0
+            else:
+                elapsed = time.monotonic() - motion_started_at
+                ramp = min(1.0, elapsed / RAMP_UP_SECONDS)
+                ramped_frequency = max(1, int(step_frequency * ramp))
 
             target_state = (
                 None
                 if active_motion is None
-                else (active_motion[0], active_motion[1], step_frequency)
+                else (active_motion[0], active_motion[1], ramped_frequency)
             )
 
             if target_state != applied_state:
@@ -219,8 +232,8 @@ def main(stdscr):
                 stdscr.addstr(
                     8,
                     0,
-                    "Move: {0} | speed: {1} ({2} Hz)                 ".format(
-                        label, speed_level, step_frequency
+                    "Move: {0} | speed: {1} ({2}/{3} Hz)             ".format(
+                        label, speed_level, ramped_frequency, step_frequency
                     ),
                 )
             else:
