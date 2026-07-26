@@ -68,7 +68,8 @@ class DRV8825:
 
 KEY_RELEASE_TIMEOUT = 0.08
 MIN_STEP_FREQUENCY = 120
-MAX_STEP_FREQUENCY = 2000
+# DRV8825 STEP timing (tWH/tWL >= 1.9 us) allows about 250 kHz max step clock.
+MAX_STEP_FREQUENCY = 250000
 RAMP_UP_SECONDS = 1.0
 
 
@@ -76,8 +77,16 @@ def step_frequency_for_level(level):
     """Map speed level 1..9 to step frequency where 9 is fastest."""
     level = max(1, min(9, level))
 
+    if level == 1:
+        return MIN_STEP_FREQUENCY
+    if level == 9:
+        return MAX_STEP_FREQUENCY
+
+    # Log-like scaling gives more practical control at low levels
+    # while still reaching the DRV8825 STEP ceiling at level 9.
     ratio = float(level - 1) / 8.0
-    return int(MIN_STEP_FREQUENCY + ratio * (MAX_STEP_FREQUENCY - MIN_STEP_FREQUENCY))
+    scale = (MAX_STEP_FREQUENCY / float(MIN_STEP_FREQUENCY)) ** ratio
+    return int(MIN_STEP_FREQUENCY * scale)
 
 
 class RobotController:
