@@ -8,8 +8,8 @@ class DRV8825(object):
 	MICROSTEP_RESOLUTION = {
 		'full': (0, 0, 0),
 		'half': (1, 0, 0),
-		'1/4': (0, 1, 0),
-		'1/8': (1, 1, 0),
+		'1/4 ': (0, 1, 0),
+		'1/8 ': (1, 1, 0),
 		'1/16': (0, 0, 1),
 		'1/32': (1, 0, 1),
 	}
@@ -130,7 +130,7 @@ def main(stdscr):
 	stdscr.addstr(3, 0, 'Left:  both wheels left')
 	stdscr.addstr(4, 0, 'Right: both wheels right')
 	stdscr.addstr(5, 0, 'Speed: press 1..9 (9 = maximum)')
-	stdscr.addstr(6, 0, 'Microstep: i=1/8, o=1/16, p=1/32')
+	stdscr.addstr(6, 0, 'Microstep: t=full, y=half, u=1/4, i=1/8, o=1/16, p=1/32')
 
 	speed_level = 5
 	step_delay = step_delay_for_level(speed_level)
@@ -160,6 +160,18 @@ def main(stdscr):
 			elif key == ord('p'):
 				robot.set_microstep('1/32')
 				stdscr.addstr(7, 0, 'Microstep set to: 1/32 | speed: {0}              '.format(speed_level))
+				active_motion = None
+			elif key == ord('u'):
+				robot.set_microstep('1/4')
+				stdscr.addstr(7, 0, 'Microstep set to: 1/4 | speed: {0}               '.format(speed_level))
+				active_motion = None
+			elif key == ord('y'):
+				robot.set_microstep('half')
+				stdscr.addstr(7, 0, 'Microstep set to: half | speed: {0}              '.format(speed_level))
+				active_motion = None
+			elif key == ord('t'):
+				robot.set_microstep('full')
+				stdscr.addstr(7, 0, 'Microstep set to: full | speed: {0}              '.format(speed_level))
 				active_motion = None
 			elif key == curses.KEY_UP:
 				active_motion = ('forward', 'backward', 'FORWARD')
