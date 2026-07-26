@@ -1,31 +1,31 @@
 import curses
 import time
 
-import lgpio
-
-
-GPIO_CHIP = 0
+try:
+    import pigpio  # type: ignore[import-not-found]
+except ModuleNotFoundError:
+    pigpio = None
 
 
 class DRV8825:
-    """Minimal DRV8825 driver using the lgpio library."""
+    """Minimal DRV8825 driver using pigpio and hardware PWM on STEP pin."""
 
-    def __init__(self, gpio_handle, dir_pin, step_pin, enable_pin, mode_pins):
-        self.gpio_handle = gpio_handle
+    def __init__(self, pi, dir_pin, step_pin, enable_pin, mode_pins):
+        self.pi = pi
         self.dir_pin = dir_pin
         self.step_pin = step_pin
         self.enable_pin = enable_pin
         self.mode_pins = tuple(mode_pins)
-        self._claimed_pins = (
+        self._all_pins = (
             self.dir_pin,
             self.step_pin,
             self.enable_pin,
             *self.mode_pins,
         )
 
-        # Claim all GPIO lines as outputs, initially low.
-        for pin in self._claimed_pins:
-            lgpio.gpio_claim_output(self.gpio_handle, pin, 0)
+        for pin in self._all_pins:
+            self.pi.set_mode(pin, pigpio.OUTPUT)
+            self.pi.write(pin, 0)
 
         # Force full-step mode: M0=0, M1=0, M2=0.
         for pin in self.mode_pins:
@@ -35,65 +35,77 @@ class DRV8825:
         self.stop()
 
     def digital_write(self, pin, value):
-        """Write a logical value to a claimed GPIO line."""
-        lgpio.gpio_write(self.gpio_handle, pin, int(bool(value)))
+        """Write a logical value to a GPIO pin."""
+        self.pi.write(pin, int(bool(value)))
+
+    def set_direction(self, direction):
+        if direction == "forward":
+            self.digital_write(self.dir_pin, 0)
+        elif direction == "backward":
+            self.digital_write(self.dir_pin, 1)
+        else:
+            raise ValueError("Unknown direction: {0}".format(direction))
+
+    def set_step_pwm(self, frequency_hz, duty_cycle=0.5):
+        """Drive STEP using hardware PWM (duty range: 0..1_000_000)."""
+        if frequency_hz <= 0:
+            self.pi.hardware_PWM(self.step_pin, 0, 0)
+            return
+
+        duty = max(0.0, min(1.0, float(duty_cycle)))
+        self.pi.hardware_PWM(self.step_pin, int(frequency_hz), int(duty * 1_000_000))
 
     def stop(self):
-        """Disable motor outputs.
-
-        The uploaded program assumes the newer Waveshare HAT revision,
-        where ENABLE=1 runs the motor and ENABLE=0 disables it.
-        """
+        """Disable output and stop step pulses."""
+        self.set_step_pwm(0)
         self.digital_write(self.enable_pin, 0)
 
-    # Keep compatibility with the original method name.
-    Stop = stop
-
-    def release(self):
-        """Release all GPIO lines claimed by this motor driver."""
-        for pin in self._claimed_pins:
-            try:
-                lgpio.gpio_free(self.gpio_handle, pin)
-            except lgpio.error:
-                # The line may already have been released during cleanup.
-                pass
+    def run(self, direction, frequency_hz):
+        self.digital_write(self.enable_pin, 1)
+        self.set_direction(direction)
+        self.set_step_pwm(frequency_hz)
 
 
-STEP_BATCH = 60
 KEY_RELEASE_TIMEOUT = 0.08
-MIN_STEP_DELAY = 0.0
-MAX_STEP_DELAY = 0.0035
+MIN_STEP_FREQUENCY = 120
+MAX_STEP_FREQUENCY = 2000
 
 
-def step_delay_for_level(level):
-    """Map speed level 1..9 to step delay where 9 is fastest."""
+def step_frequency_for_level(level):
+    """Map speed level 1..9 to step frequency where 9 is fastest."""
     level = max(1, min(9, level))
 
-    if level == 9:
-        return MIN_STEP_DELAY
-
-    # Linear map: 1 -> MAX_STEP_DELAY, 9 -> MIN_STEP_DELAY.
     ratio = float(level - 1) / 8.0
-    return MAX_STEP_DELAY - ratio * (MAX_STEP_DELAY - MIN_STEP_DELAY)
+    return int(MIN_STEP_FREQUENCY + ratio * (MAX_STEP_FREQUENCY - MIN_STEP_FREQUENCY))
 
 
 class RobotController:
-    def __init__(self, gpio_chip=GPIO_CHIP):
-        self.gpio_handle = lgpio.gpiochip_open(gpio_chip)
+    def __init__(self):
+        if pigpio is None:
+            raise RuntimeError(
+                "Brak modułu pigpio. Zainstaluj: sudo apt install python3-pigpio"
+            )
+
+        self.pi = pigpio.pi()
+        if not self.pi.connected:
+            raise RuntimeError(
+                "Brak połączenia z pigpiod. Uruchom: sudo pigpiod"
+            )
+
         self.right_motor = None
         self.left_motor = None
 
         try:
             # BCM pin mapping from the original script / Waveshare HAT.
             self.right_motor = DRV8825(
-                gpio_handle=self.gpio_handle,
+                pi=self.pi,
                 dir_pin=13,
                 step_pin=19,
                 enable_pin=12,
                 mode_pins=(16, 17, 20),
             )
             self.left_motor = DRV8825(
-                gpio_handle=self.gpio_handle,
+                pi=self.pi,
                 dir_pin=24,
                 step_pin=18,
                 enable_pin=4,
@@ -103,33 +115,9 @@ class RobotController:
             self.close()
             raise
 
-    @staticmethod
-    def _set_direction(motor, direction):
-        if direction == "forward":
-            motor.digital_write(motor.enable_pin, 1)
-            motor.digital_write(motor.dir_pin, 0)
-        elif direction == "backward":
-            motor.digital_write(motor.enable_pin, 1)
-            motor.digital_write(motor.dir_pin, 1)
-        else:
-            raise ValueError("Unknown direction: {0}".format(direction))
-
-    def drive(self, right_dir, left_dir, steps=STEP_BATCH, step_delay=0.003):
-        self._set_direction(self.right_motor, right_dir)
-        self._set_direction(self.left_motor, left_dir)
-
-        for _ in range(steps):
-            self.right_motor.digital_write(self.right_motor.step_pin, 1)
-            self.left_motor.digital_write(self.left_motor.step_pin, 1)
-
-            if step_delay > 0.0:
-                time.sleep(step_delay)
-
-            self.right_motor.digital_write(self.right_motor.step_pin, 0)
-            self.left_motor.digital_write(self.left_motor.step_pin, 0)
-
-            if step_delay > 0.0:
-                time.sleep(step_delay)
+    def drive(self, right_dir, left_dir, step_frequency_hz):
+        self.right_motor.run(right_dir, step_frequency_hz)
+        self.left_motor.run(left_dir, step_frequency_hz)
 
     def stop(self):
         if self.right_motor is not None:
@@ -141,20 +129,12 @@ class RobotController:
         """Stop motors, release GPIO lines, and close gpiochip."""
         self.stop()
 
-        if self.right_motor is not None:
-            self.right_motor.release()
-            self.right_motor = None
+        self.right_motor = None
+        self.left_motor = None
 
-        if self.left_motor is not None:
-            self.left_motor.release()
-            self.left_motor = None
-
-        if self.gpio_handle is not None:
-            try:
-                lgpio.gpiochip_close(self.gpio_handle)
-            except lgpio.error:
-                pass
-            self.gpio_handle = None
+        if self.pi is not None:
+            self.pi.stop()
+            self.pi = None
 
 
 def main(stdscr):
@@ -171,12 +151,14 @@ def main(stdscr):
     stdscr.addstr(4, 0, "Right: both wheels right")
     stdscr.addstr(5, 0, "Speed: press 1..9 (9 = maximum)")
     stdscr.addstr(6, 0, "Full-step mode enabled (microstepping disabled)")
+    stdscr.addstr(7, 0, "STEP driven by pigpio hardware_PWM on GPIO18/19")
 
     speed_level = 5
-    step_delay = step_delay_for_level(speed_level)
+    step_frequency = step_frequency_for_level(speed_level)
     active_motion = None
+    applied_state = None
     last_motion_key_at = 0.0
-    stdscr.addstr(7, 0, "Waiting for key... Speed level: 5")
+    stdscr.addstr(8, 0, "Waiting for key... Speed level: 5")
     stdscr.refresh()
 
     try:
@@ -187,15 +169,14 @@ def main(stdscr):
                 break
             elif ord("1") <= key <= ord("9"):
                 speed_level = key - ord("0")
-                step_delay = step_delay_for_level(speed_level)
+                step_frequency = step_frequency_for_level(speed_level)
                 stdscr.addstr(
-                    7,
+                    8,
                     0,
-                    "Speed set to: {0}                               ".format(
-                        speed_level
+                    "Speed set to: {0} ({1} Hz)                      ".format(
+                        speed_level, step_frequency
                     ),
                 )
-                active_motion = None
             elif key == curses.KEY_UP:
                 active_motion = ("forward", "backward", "FORWARD")
                 last_motion_key_at = time.monotonic()
@@ -216,36 +197,43 @@ def main(stdscr):
                 ):
                     active_motion = None
 
-            if active_motion is not None:
-                right_dir, left_dir, label = active_motion
+            target_state = (
+                None
+                if active_motion is None
+                else (active_motion[0], active_motion[1], step_frequency)
+            )
 
-                # Generate one step, then poll the keyboard again so release
-                # of an arrow key is detected quickly.
-                robot.drive(
-                    right_dir=right_dir,
-                    left_dir=left_dir,
-                    steps=1,
-                    step_delay=step_delay,
-                )
+            if target_state != applied_state:
+                if target_state is None:
+                    robot.stop()
+                else:
+                    robot.drive(
+                        right_dir=target_state[0],
+                        left_dir=target_state[1],
+                        step_frequency_hz=target_state[2],
+                    )
+                applied_state = target_state
+
+            if active_motion is not None:
+                _, _, label = active_motion
                 stdscr.addstr(
-                    7,
+                    8,
                     0,
-                    "Move: {0} | speed: {1}                          ".format(
-                        label, speed_level
+                    "Move: {0} | speed: {1} ({2} Hz)                 ".format(
+                        label, speed_level, step_frequency
                     ),
                 )
             else:
-                robot.stop()
                 stdscr.addstr(
-                    7,
+                    8,
                     0,
-                    "Stop / waiting for arrow key... speed: {0}       ".format(
-                        speed_level
+                    "Stop / waiting for arrow key... speed: {0} ({1} Hz) ".format(
+                        speed_level, step_frequency
                     ),
                 )
 
             stdscr.refresh()
-            time.sleep(0.001)
+            time.sleep(0.01)
     finally:
         robot.close()
 

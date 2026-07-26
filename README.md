@@ -1,6 +1,20 @@
 # Popcornition App
 
 Prosta aplikacja terminalowa do sterowania robotem (silniki DRV8825) na Raspberry Pi.
+Kod używa `pigpio` i sprzętowego PWM (`hardware_PWM`) do generowania impulsów STEP.
+
+## Wymagania
+
+- Raspberry Pi z aktywnym daemonem `pigpiod`
+- biblioteka Python `pigpio`
+
+Przykładowe uruchomienie na Raspberry Pi:
+
+```bash
+sudo apt install pigpio python3-pigpio
+sudo pigpiod
+python3 popcornition_app.py
+```
 
 ## Sterowanie
 
@@ -11,4 +25,4 @@ Prosta aplikacja terminalowa do sterowania robotem (silniki DRV8825) na Raspberr
 ## Tryb pracy silników
 
 Aplikacja działa w trybie pełnego kroku (`full-step`), bez microstepingu.
-Dla poziomu prędkości `9` opóźnienie impulsów jest wyłączone, co daje maksymalną częstotliwość kroków możliwą do uzyskania przez ten kod i bibliotekę GPIO.
+Sygnał STEP jest generowany przez `hardware_PWM` na pinach GPIO18 i GPIO19.
