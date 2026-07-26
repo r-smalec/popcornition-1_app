@@ -73,9 +73,11 @@ class DRV8825:
 
 KEY_RELEASE_TIMEOUT = 0.08
 MIN_STEP_FREQUENCY = 120
-# DRV8825 STEP timing (tWH/tWL >= 1.9 us) allows about 250 kHz max step clock.
-MAX_STEP_FREQUENCY = 250000
+# Practical max chosen from observed stable behavior: old level 6.
+MAX_STEP_FREQUENCY = 14243
 RAMP_UP_SECONDS = 1.0
+RAMP_STEPS = 10
+RAMP_STEP_SECONDS = RAMP_UP_SECONDS / RAMP_STEPS
 
 
 def step_frequency_for_level(level):
@@ -88,7 +90,7 @@ def step_frequency_for_level(level):
         return MAX_STEP_FREQUENCY
 
     # Log-like scaling gives more practical control at low levels
-    # while still reaching the DRV8825 STEP ceiling at level 9.
+    # while still reaching the configured top speed at level 9.
     ratio = float(level - 1) / 8.0
     scale = (MAX_STEP_FREQUENCY / float(MIN_STEP_FREQUENCY)) ** ratio
     return int(MIN_STEP_FREQUENCY * scale)
@@ -257,8 +259,8 @@ def main(stdscr):
                 ramped_frequency = 0
             else:
                 elapsed = time.monotonic() - motion_started_at
-                ramp = min(1.0, elapsed / RAMP_UP_SECONDS)
-                ramped_frequency = max(1, int(step_frequency * ramp))
+                ramp_stage = min(RAMP_STEPS, int(elapsed / RAMP_STEP_SECONDS) + 1)
+                ramped_frequency = max(1, int(step_frequency * ramp_stage / RAMP_STEPS))
 
             target_state = (
                 None
