@@ -48,25 +48,39 @@ class DRV8825(object):
 
 
 STEP_BATCH = 60
-MIN_STEP_DELAY = 0.0002
-MAX_STEP_DELAY = 0.003
 DEFAULT_MICROSTEP = '1/32'
 KEY_RELEASE_TIMEOUT = 0.08
 
+# Per-mode delay window (seconds): higher delay means lower pulse frequency.
+# Full-step at very high pulse frequency can lose steps under load.
+MICROSTEP_DELAY_LIMITS = {
+	'full': (0.0007, 0.0035),
+	'half': (0.00055, 0.0032),
+	'1/4': (0.0004, 0.0030),
+	'1/8': (0.0003, 0.0028),
+	'1/16': (0.00025, 0.0026),
+	'1/32': (0.0002, 0.0024),
+}
 
-def step_delay_for_level(level):
+
+def step_delay_for_level(level, microstep_mode):
 	"""Map speed level 1..9 to step delay where 9 is fastest."""
 	if level < 1:
 		level = 1
 	elif level > 9:
 		level = 9
 
-	if level == 9:
-		return MIN_STEP_DELAY
+	if microstep_mode not in MICROSTEP_DELAY_LIMITS:
+		microstep_mode = DEFAULT_MICROSTEP
 
-	# Linear map: 1 -> MAX_STEP_DELAY, 9 -> MIN_STEP_DELAY.
+	min_delay, max_delay = MICROSTEP_DELAY_LIMITS[microstep_mode]
+
+	if level == 9:
+		return min_delay
+
+	# Linear map: 1 -> max_delay, 9 -> min_delay.
 	ratio = float(level - 1) / 8.0
-	return MAX_STEP_DELAY - ratio * (MAX_STEP_DELAY - MIN_STEP_DELAY)
+	return max_delay - ratio * (max_delay - min_delay)
 
 
 class RobotController(object):
@@ -101,7 +115,7 @@ class RobotController(object):
 			motor.digital_write(motor.enable_pin, 1)
 			motor.digital_write(motor.dir_pin, 1)
 
-	def drive(self, right_dir, left_dir, steps=STEP_BATCH, step_delay=MAX_STEP_DELAY):
+	def drive(self, right_dir, left_dir, steps=STEP_BATCH, step_delay=0.003):
 		self._set_direction(self.right_motor, right_dir)
 		self._set_direction(self.left_motor, left_dir)
 
@@ -134,7 +148,7 @@ def main(stdscr):
 	stdscr.addstr(6, 0, 'Microstep: t=full, y=half, u=1/4, i=1/8, o=1/16, p=1/32')
 
 	speed_level = 5
-	step_delay = step_delay_for_level(speed_level)
+	step_delay = step_delay_for_level(speed_level, robot.microstep_mode)
 	active_motion = None
 	last_motion_key_at = 0.0
 	stdscr.addstr(7, 0, 'Waiting for key... Speed level: 5 | microstep: {0}'.format(robot.microstep_mode))
@@ -148,31 +162,37 @@ def main(stdscr):
 				break
 			elif key >= ord('1') and key <= ord('9'):
 				speed_level = key - ord('0')
-				step_delay = step_delay_for_level(speed_level)
+				step_delay = step_delay_for_level(speed_level, robot.microstep_mode)
 				stdscr.addstr(7, 0, 'Speed set to: {0} | microstep: {1}               '.format(speed_level, robot.microstep_mode))
 				active_motion = None
 			elif key == ord('i'):
 				robot.set_microstep('1/8')
+				step_delay = step_delay_for_level(speed_level, robot.microstep_mode)
 				stdscr.addstr(7, 0, 'Microstep set to: 1/8 | speed: {0}               '.format(speed_level))
 				active_motion = None
 			elif key == ord('o'):
 				robot.set_microstep('1/16')
+				step_delay = step_delay_for_level(speed_level, robot.microstep_mode)
 				stdscr.addstr(7, 0, 'Microstep set to: 1/16 | speed: {0}              '.format(speed_level))
 				active_motion = None
 			elif key == ord('p'):
 				robot.set_microstep('1/32')
+				step_delay = step_delay_for_level(speed_level, robot.microstep_mode)
 				stdscr.addstr(7, 0, 'Microstep set to: 1/32 | speed: {0}              '.format(speed_level))
 				active_motion = None
 			elif key == ord('u'):
 				robot.set_microstep('1/4')
+				step_delay = step_delay_for_level(speed_level, robot.microstep_mode)
 				stdscr.addstr(7, 0, 'Microstep set to: 1/4 | speed: {0}               '.format(speed_level))
 				active_motion = None
 			elif key == ord('y'):
 				robot.set_microstep('half')
+				step_delay = step_delay_for_level(speed_level, robot.microstep_mode)
 				stdscr.addstr(7, 0, 'Microstep set to: half | speed: {0}              '.format(speed_level))
 				active_motion = None
 			elif key == ord('t'):
 				robot.set_microstep('full')
+				step_delay = step_delay_for_level(speed_level, robot.microstep_mode)
 				stdscr.addstr(7, 0, 'Microstep set to: full | speed: {0}              '.format(speed_level))
 				active_motion = None
 			elif key == curses.KEY_UP:
