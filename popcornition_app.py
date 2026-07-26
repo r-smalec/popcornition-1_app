@@ -8,8 +8,8 @@ class DRV8825(object):
 	MICROSTEP_RESOLUTION = {
 		'full': (0, 0, 0),
 		'half': (1, 0, 0),
-		'1/4 ': (0, 1, 0),
-		'1/8 ': (1, 1, 0),
+		'1/4': (0, 1, 0),
+		'1/8': (1, 1, 0),
 		'1/16': (0, 0, 1),
 		'1/32': (1, 0, 1),
 	}
@@ -51,6 +51,7 @@ STEP_BATCH = 60
 MIN_STEP_DELAY = 0.0002
 MAX_STEP_DELAY = 0.003
 DEFAULT_MICROSTEP = '1/32'
+KEY_RELEASE_TIMEOUT = 0.08
 
 
 def step_delay_for_level(level):
@@ -135,6 +136,7 @@ def main(stdscr):
 	speed_level = 5
 	step_delay = step_delay_for_level(speed_level)
 	active_motion = None
+	last_motion_key_at = 0.0
 	stdscr.addstr(7, 0, 'Waiting for key... Speed level: 5 | microstep: {0}'.format(robot.microstep_mode))
 	stdscr.refresh()
 
@@ -175,14 +177,19 @@ def main(stdscr):
 				active_motion = None
 			elif key == curses.KEY_UP:
 				active_motion = ('forward', 'backward', 'FORWARD')
+				last_motion_key_at = time.monotonic()
 			elif key == curses.KEY_DOWN:
 				active_motion = ('backward', 'forward', 'BACKWARD')
+				last_motion_key_at = time.monotonic()
 			elif key == curses.KEY_LEFT:
 				active_motion = ('backward', 'backward', 'LEFT')
+				last_motion_key_at = time.monotonic()
 			elif key == curses.KEY_RIGHT:
 				active_motion = ('forward', 'forward', 'RIGHT')
+				last_motion_key_at = time.monotonic()
 			elif key == -1:
-				active_motion = None
+				if active_motion is not None and (time.monotonic() - last_motion_key_at) > KEY_RELEASE_TIMEOUT:
+					active_motion = None
 
 			if active_motion is not None:
 				right_dir, left_dir, label = active_motion
