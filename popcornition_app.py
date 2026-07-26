@@ -2,6 +2,11 @@ import curses
 import time
 
 try:
+    import keyboard  # type: ignore[import-not-found]
+except ModuleNotFoundError:
+    keyboard = None
+
+try:
     import pigpio  # type: ignore[import-not-found]
 except ModuleNotFoundError:
     pigpio = None
@@ -169,13 +174,42 @@ def main(stdscr):
     applied_state = None
     motion_started_at = None
     last_motion_key_at = 0.0
+
+    keyboard_hold_mode = False
+    if keyboard is not None:
+        try:
+            # Check permissions/backend once. On Linux this may need root.
+            keyboard.is_pressed("up")
+            keyboard_hold_mode = True
+        except Exception:
+            keyboard_hold_mode = False
+
     stdscr.addstr(8, 0, "Waiting for key... Speed level: 5")
+    stdscr.addstr(
+        9,
+        0,
+        "Hold mode: {0}".format("keyboard module" if keyboard_hold_mode else "curses fallback"),
+    )
     stdscr.refresh()
 
     try:
         while True:
             key = stdscr.getch()
             requested_motion = None
+
+            if keyboard_hold_mode:
+                try:
+                    if keyboard.is_pressed("up"):
+                        requested_motion = ("forward", "backward", "FORWARD")
+                    elif keyboard.is_pressed("down"):
+                        requested_motion = ("backward", "forward", "BACKWARD")
+                    elif keyboard.is_pressed("left"):
+                        requested_motion = ("backward", "backward", "LEFT")
+                    elif keyboard.is_pressed("right"):
+                        requested_motion = ("forward", "forward", "RIGHT")
+                except Exception:
+                    keyboard_hold_mode = False
+                    stdscr.addstr(9, 0, "Hold mode: curses fallback                           ")
 
             if key == ord("q"):
                 break
@@ -189,28 +223,35 @@ def main(stdscr):
                         speed_level, step_frequency
                     ),
                 )
-            elif key == curses.KEY_UP:
-                requested_motion = ("forward", "backward", "FORWARD")
-            elif key == curses.KEY_DOWN:
-                requested_motion = ("backward", "forward", "BACKWARD")
-            elif key == curses.KEY_LEFT:
-                requested_motion = ("backward", "backward", "LEFT")
-            elif key == curses.KEY_RIGHT:
-                requested_motion = ("forward", "forward", "RIGHT")
-            elif key == -1:
-                if (
-                    active_motion is not None
-                    and (time.monotonic() - last_motion_key_at)
-                    > KEY_RELEASE_TIMEOUT
-                ):
-                    active_motion = None
-                    motion_started_at = None
+            if not keyboard_hold_mode:
+                if key == curses.KEY_UP:
+                    requested_motion = ("forward", "backward", "FORWARD")
+                elif key == curses.KEY_DOWN:
+                    requested_motion = ("backward", "forward", "BACKWARD")
+                elif key == curses.KEY_LEFT:
+                    requested_motion = ("backward", "backward", "LEFT")
+                elif key == curses.KEY_RIGHT:
+                    requested_motion = ("forward", "forward", "RIGHT")
+                elif key == -1:
+                    if (
+                        active_motion is not None
+                        and (time.monotonic() - last_motion_key_at)
+                        > KEY_RELEASE_TIMEOUT
+                    ):
+                        active_motion = None
+                        motion_started_at = None
 
-            if requested_motion is not None:
+                if requested_motion is not None:
+                    if requested_motion != active_motion:
+                        active_motion = requested_motion
+                        motion_started_at = time.monotonic()
+                    last_motion_key_at = time.monotonic()
+            else:
                 if requested_motion != active_motion:
                     active_motion = requested_motion
-                    motion_started_at = time.monotonic()
-                last_motion_key_at = time.monotonic()
+                    motion_started_at = (
+                        None if requested_motion is None else time.monotonic()
+                    )
 
             if active_motion is None:
                 ramped_frequency = 0
