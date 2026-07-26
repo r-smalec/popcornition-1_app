@@ -1,4 +1,7 @@
 import curses
+import atexit
+import signal
+import sys
 import time
 
 try:
@@ -10,6 +13,44 @@ try:
     import pigpio  # type: ignore[import-not-found]
 except ModuleNotFoundError:
     pigpio = None
+
+
+ACTIVE_ROBOT_CONTROLLER = None
+
+
+def _emergency_shutdown(reason="shutdown"):
+    """Best-effort emergency stop used by signals/atexit/error paths."""
+    global ACTIVE_ROBOT_CONTROLLER
+
+    robot = ACTIVE_ROBOT_CONTROLLER
+    if robot is None:
+        return
+
+    ACTIVE_ROBOT_CONTROLLER = None
+    try:
+        robot.close()
+    except Exception:
+        # Emergency path must never crash while stopping motors.
+        pass
+
+
+def _signal_handler(signum, _frame):
+    _emergency_shutdown("signal:{0}".format(signum))
+    raise SystemExit(128 + signum)
+
+
+def _register_emergency_handlers():
+    atexit.register(_emergency_shutdown)
+
+    for sig_name in ("SIGINT", "SIGTERM", "SIGHUP"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _signal_handler)
+        except (ValueError, OSError, RuntimeError):
+            # Some environments may not allow setting handlers.
+            continue
 
 
 class DRV8825:
@@ -155,7 +196,10 @@ class RobotController:
 
 
 def main(stdscr):
+    global ACTIVE_ROBOT_CONTROLLER
+
     robot = RobotController()
+    ACTIVE_ROBOT_CONTROLLER = robot
 
     curses.curs_set(0)
     stdscr.nodelay(True)
@@ -301,7 +345,14 @@ def main(stdscr):
             time.sleep(0.01)
     finally:
         robot.close()
+        ACTIVE_ROBOT_CONTROLLER = None
 
 
 if __name__ == "__main__":
-    curses.wrapper(main)
+    _register_emergency_handlers()
+
+    try:
+        curses.wrapper(main)
+    except BaseException:
+        _emergency_shutdown("fatal-error")
+        raise
