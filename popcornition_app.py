@@ -120,6 +120,11 @@ RAMP_UP_SECONDS = 1.0
 RAMP_STEPS = 10
 RAMP_STEP_SECONDS = RAMP_UP_SECONDS / RAMP_STEPS
 
+SERVO_GPIO = 23
+SERVO_STOP_PULSE_US = 1500
+SERVO_CW_PULSE_US = 1700
+SERVO_CCW_PULSE_US = 1300
+
 
 def step_frequency_for_level(level):
     """Map speed level 1..9 to step frequency where 9 is fastest."""
@@ -152,6 +157,8 @@ class RobotController:
 
         self.right_motor = None
         self.left_motor = None
+        self.servo_gpio = SERVO_GPIO
+        self.servo_direction = None
 
         try:
             # BCM pin mapping from the original script / Waveshare HAT.
@@ -169,6 +176,9 @@ class RobotController:
                 enable_pin=4,
                 mode_pins=(21, 22, 27),
             )
+
+            self.pi.set_mode(self.servo_gpio, pigpio.OUTPUT)
+            self.pi.set_servo_pulsewidth(self.servo_gpio, SERVO_STOP_PULSE_US)
         except Exception:
             self.close()
             raise
@@ -182,6 +192,23 @@ class RobotController:
             self.right_motor.stop()
         if self.left_motor is not None:
             self.left_motor.stop()
+        self.set_servo_direction(None)
+
+    def set_servo_direction(self, direction):
+        if self.pi is None:
+            return
+
+        if direction == "cw":
+            pulse = SERVO_CW_PULSE_US
+        elif direction == "ccw":
+            pulse = SERVO_CCW_PULSE_US
+        elif direction is None:
+            pulse = 0
+        else:
+            raise ValueError("Unknown servo direction: {0}".format(direction))
+
+        self.pi.set_servo_pulsewidth(self.servo_gpio, pulse)
+        self.servo_direction = direction
 
     def close(self):
         """Stop motors, release GPIO lines, and close gpiochip."""
@@ -213,6 +240,7 @@ def main(stdscr):
     stdscr.addstr(5, 0, "Speed: press 1..9 (9 = maximum)")
     stdscr.addstr(6, 0, "Full-step mode enabled (microstepping disabled)")
     stdscr.addstr(7, 0, "STEP driven by pigpio hardware_PWM on GPIO18/19")
+    stdscr.addstr(10, 0, "Servo SG90: w = CCW, s = CW (GPIO23 / fizyczny pin 16)")
 
     speed_level = 5
     step_frequency = step_frequency_for_level(speed_level)
@@ -220,6 +248,9 @@ def main(stdscr):
     applied_state = None
     motion_started_at = None
     last_motion_key_at = 0.0
+    active_servo = None
+    applied_servo = None
+    last_servo_key_at = 0.0
 
     keyboard_hold_mode = False
     if keyboard is not None:
@@ -253,6 +284,15 @@ def main(stdscr):
                         requested_motion = ("backward", "backward", "LEFT")
                     elif keyboard.is_pressed("right"):
                         requested_motion = ("forward", "forward", "RIGHT")
+
+                    w_pressed = keyboard.is_pressed("w")
+                    s_pressed = keyboard.is_pressed("s")
+                    if w_pressed and not s_pressed:
+                        active_servo = "ccw"
+                    elif s_pressed and not w_pressed:
+                        active_servo = "cw"
+                    else:
+                        active_servo = None
                 except Exception:
                     keyboard_hold_mode = False
                     stdscr.addstr(9, 0, "Hold mode: curses fallback                           ")
@@ -278,6 +318,12 @@ def main(stdscr):
                     requested_motion = ("backward", "backward", "LEFT")
                 elif key == curses.KEY_RIGHT:
                     requested_motion = ("forward", "forward", "RIGHT")
+                elif key in (ord("w"), ord("W")):
+                    active_servo = "ccw"
+                    last_servo_key_at = time.monotonic()
+                elif key in (ord("s"), ord("S")):
+                    active_servo = "cw"
+                    last_servo_key_at = time.monotonic()
                 elif key == -1:
                     if (
                         active_motion is not None
@@ -286,6 +332,12 @@ def main(stdscr):
                     ):
                         active_motion = None
                         motion_started_at = None
+                    if (
+                        active_servo is not None
+                        and (time.monotonic() - last_servo_key_at)
+                        > KEY_RELEASE_TIMEOUT
+                    ):
+                        active_servo = None
 
                 if requested_motion is not None:
                     if requested_motion != active_motion:
@@ -323,6 +375,10 @@ def main(stdscr):
                     )
                 applied_state = target_state
 
+            if active_servo != applied_servo:
+                robot.set_servo_direction(active_servo)
+                applied_servo = active_servo
+
             if active_motion is not None:
                 _, _, label = active_motion
                 stdscr.addstr(
@@ -340,6 +396,14 @@ def main(stdscr):
                         speed_level, step_frequency
                     ),
                 )
+
+            if active_servo == "cw":
+                servo_label = "CW"
+            elif active_servo == "ccw":
+                servo_label = "CCW"
+            else:
+                servo_label = "STOP"
+            stdscr.addstr(11, 0, "Servo: {0}                               ".format(servo_label))
 
             stdscr.refresh()
             time.sleep(0.01)
