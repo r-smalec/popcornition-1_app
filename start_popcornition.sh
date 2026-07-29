@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CAMERA_CMD='libcamera-hello --timeout 0'
+CAMERA_CMD='libcamera-hello --timeout 0 --freamerate 5'
 
 launch_camera_in_second_terminal() {
 	# Try common terminal emulators used on Raspberry Pi / Linux desktops.
