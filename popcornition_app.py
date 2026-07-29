@@ -121,9 +121,25 @@ RAMP_STEPS = 10
 RAMP_STEP_SECONDS = RAMP_UP_SECONDS / RAMP_STEPS
 
 SERVO_GPIO = 23
-SERVO_STOP_PULSE_US = 1500
-SERVO_CW_PULSE_US = 1700
-SERVO_CCW_PULSE_US = 1300
+SERVO_MIN_ANGLE = 90
+SERVO_MAX_ANGLE = 180
+SERVO_STEP_ANGLE = 5
+SERVO_START_ANGLE = 90
+SERVO_MIN_PULSE_US = 500
+SERVO_MAX_PULSE_US = 2500
+
+
+def clamp(value, min_value, max_value):
+    return max(min_value, min(max_value, value))
+
+
+def servo_pulse_for_angle(angle):
+    """Convert angle in degrees to SG90 pulse width in microseconds."""
+    bounded_angle = clamp(int(angle), SERVO_MIN_ANGLE, SERVO_MAX_ANGLE)
+    span_angle = SERVO_MAX_ANGLE - SERVO_MIN_ANGLE
+    span_pulse = SERVO_MAX_PULSE_US - SERVO_MIN_PULSE_US
+    ratio = float(bounded_angle - SERVO_MIN_ANGLE) / float(span_angle)
+    return int(SERVO_MIN_PULSE_US + ratio * span_pulse)
 
 
 def step_frequency_for_level(level):
@@ -158,7 +174,7 @@ class RobotController:
         self.right_motor = None
         self.left_motor = None
         self.servo_gpio = SERVO_GPIO
-        self.servo_direction = None
+        self.servo_angle = SERVO_START_ANGLE
 
         try:
             # BCM pin mapping from the original script / Waveshare HAT.
@@ -178,7 +194,7 @@ class RobotController:
             )
 
             self.pi.set_mode(self.servo_gpio, pigpio.OUTPUT)
-            self.pi.set_servo_pulsewidth(self.servo_gpio, SERVO_STOP_PULSE_US)
+            self.set_servo_angle(self.servo_angle)
         except Exception:
             self.close()
             raise
@@ -192,27 +208,23 @@ class RobotController:
             self.right_motor.stop()
         if self.left_motor is not None:
             self.left_motor.stop()
-        self.set_servo_direction(None)
+        self.set_servo_angle(self.servo_angle)
 
-    def set_servo_direction(self, direction):
+    def set_servo_angle(self, angle):
         if self.pi is None:
             return
 
-        if direction == "cw":
-            pulse = SERVO_CW_PULSE_US
-        elif direction == "ccw":
-            pulse = SERVO_CCW_PULSE_US
-        elif direction is None:
-            pulse = 0
-        else:
-            raise ValueError("Unknown servo direction: {0}".format(direction))
-
+        bounded_angle = clamp(int(angle), SERVO_MIN_ANGLE, SERVO_MAX_ANGLE)
+        pulse = servo_pulse_for_angle(bounded_angle)
         self.pi.set_servo_pulsewidth(self.servo_gpio, pulse)
-        self.servo_direction = direction
+        self.servo_angle = bounded_angle
 
     def close(self):
         """Stop motors, release GPIO lines, and close gpiochip."""
         self.stop()
+
+        if self.pi is not None:
+            self.pi.set_servo_pulsewidth(self.servo_gpio, 0)
 
         self.right_motor = None
         self.left_motor = None
@@ -240,7 +252,11 @@ def main(stdscr):
     stdscr.addstr(5, 0, "Speed: press 1..9 (9 = maximum)")
     stdscr.addstr(6, 0, "Full-step mode enabled (microstepping disabled)")
     stdscr.addstr(7, 0, "STEP driven by pigpio hardware_PWM on GPIO18/19")
-    stdscr.addstr(10, 0, "Servo SG90: w = CCW, s = CW (GPIO23 / fizyczny pin 16)")
+    stdscr.addstr(10, 0, "Servo SG90: w/s = krok {0} st, zakres {1}-{2} st".format(
+        SERVO_STEP_ANGLE,
+        SERVO_MIN_ANGLE,
+        SERVO_MAX_ANGLE,
+    ))
 
     speed_level = 5
     step_frequency = step_frequency_for_level(speed_level)
@@ -248,9 +264,10 @@ def main(stdscr):
     applied_state = None
     motion_started_at = None
     last_motion_key_at = 0.0
-    active_servo = None
-    applied_servo = None
-    last_servo_key_at = 0.0
+    servo_angle = SERVO_START_ANGLE
+    robot.set_servo_angle(servo_angle)
+    w_was_pressed = False
+    s_was_pressed = False
 
     keyboard_hold_mode = False
     if keyboard is not None:
@@ -287,12 +304,22 @@ def main(stdscr):
 
                     w_pressed = keyboard.is_pressed("w")
                     s_pressed = keyboard.is_pressed("s")
-                    if w_pressed and not s_pressed:
-                        active_servo = "ccw"
-                    elif s_pressed and not w_pressed:
-                        active_servo = "cw"
-                    else:
-                        active_servo = None
+
+                    if w_pressed and not w_was_pressed:
+                        servo_angle = clamp(
+                            servo_angle + SERVO_STEP_ANGLE,
+                            SERVO_MIN_ANGLE,
+                            SERVO_MAX_ANGLE,
+                        )
+                    if s_pressed and not s_was_pressed:
+                        servo_angle = clamp(
+                            servo_angle - SERVO_STEP_ANGLE,
+                            SERVO_MIN_ANGLE,
+                            SERVO_MAX_ANGLE,
+                        )
+
+                    w_was_pressed = w_pressed
+                    s_was_pressed = s_pressed
                 except Exception:
                     keyboard_hold_mode = False
                     stdscr.addstr(9, 0, "Hold mode: curses fallback                           ")
@@ -319,11 +346,17 @@ def main(stdscr):
                 elif key == curses.KEY_RIGHT:
                     requested_motion = ("forward", "forward", "RIGHT")
                 elif key in (ord("w"), ord("W")):
-                    active_servo = "ccw"
-                    last_servo_key_at = time.monotonic()
+                    servo_angle = clamp(
+                        servo_angle + SERVO_STEP_ANGLE,
+                        SERVO_MIN_ANGLE,
+                        SERVO_MAX_ANGLE,
+                    )
                 elif key in (ord("s"), ord("S")):
-                    active_servo = "cw"
-                    last_servo_key_at = time.monotonic()
+                    servo_angle = clamp(
+                        servo_angle - SERVO_STEP_ANGLE,
+                        SERVO_MIN_ANGLE,
+                        SERVO_MAX_ANGLE,
+                    )
                 elif key == -1:
                     if (
                         active_motion is not None
@@ -332,12 +365,6 @@ def main(stdscr):
                     ):
                         active_motion = None
                         motion_started_at = None
-                    if (
-                        active_servo is not None
-                        and (time.monotonic() - last_servo_key_at)
-                        > KEY_RELEASE_TIMEOUT
-                    ):
-                        active_servo = None
 
                 if requested_motion is not None:
                     if requested_motion != active_motion:
@@ -375,9 +402,8 @@ def main(stdscr):
                     )
                 applied_state = target_state
 
-            if active_servo != applied_servo:
-                robot.set_servo_direction(active_servo)
-                applied_servo = active_servo
+            if servo_angle != robot.servo_angle:
+                robot.set_servo_angle(servo_angle)
 
             if active_motion is not None:
                 _, _, label = active_motion
@@ -397,13 +423,16 @@ def main(stdscr):
                     ),
                 )
 
-            if active_servo == "cw":
-                servo_label = "CW"
-            elif active_servo == "ccw":
-                servo_label = "CCW"
-            else:
-                servo_label = "STOP"
-            stdscr.addstr(11, 0, "Servo: {0}                               ".format(servo_label))
+            stdscr.addstr(
+                11,
+                0,
+                "Servo: {0} st (krok {1}, min/max {2}/{3})                ".format(
+                    robot.servo_angle,
+                    SERVO_STEP_ANGLE,
+                    SERVO_MIN_ANGLE,
+                    SERVO_MAX_ANGLE,
+                ),
+            )
 
             stdscr.refresh()
             time.sleep(0.01)
