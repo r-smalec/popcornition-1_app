@@ -130,7 +130,7 @@ SERVO_MIN_PULSE_US = 500
 SERVO_MAX_PULSE_US = 2500
 # Experimental runtime limits for safe servo travel.
 SERVO_LIMIT_MIN_ANGLE = 5
-SERVO_LIMIT_MAX_ANGLE = 60
+SERVO_LIMIT_MAX_ANGLE = 40
 
 
 def clamp(value, min_value, max_value):
