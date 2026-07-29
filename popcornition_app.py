@@ -128,6 +128,9 @@ SERVO_STEP_ANGLE = 5
 SERVO_START_ANGLE = 20
 SERVO_MIN_PULSE_US = 500
 SERVO_MAX_PULSE_US = 2500
+# Experimental runtime limits for safe servo travel.
+SERVO_LIMIT_MIN_ANGLE = 5
+SERVO_LIMIT_MAX_ANGLE = 60
 
 
 def clamp(value, min_value, max_value):
@@ -215,7 +218,7 @@ class RobotController:
         if self.pi is None:
             return
 
-        bounded_angle = clamp(int(angle), SERVO_MIN_ANGLE, SERVO_MAX_ANGLE)
+        bounded_angle = clamp(int(angle), SERVO_LIMIT_MIN_ANGLE, SERVO_LIMIT_MAX_ANGLE)
         pulse = servo_pulse_for_angle(bounded_angle)
         self.pi.set_servo_pulsewidth(self.servo_gpio, pulse)
         self.servo_angle = bounded_angle
@@ -255,8 +258,8 @@ def main(stdscr):
     stdscr.addstr(7, 0, "STEP driven by pigpio hardware_PWM on GPIO18/19")
     stdscr.addstr(10, 0, "Servo SG90: w/s = krok {0} st, zakres {1}-{2} st".format(
         SERVO_STEP_ANGLE,
-        SERVO_MIN_ANGLE,
-        SERVO_MAX_ANGLE,
+        SERVO_LIMIT_MIN_ANGLE,
+        SERVO_LIMIT_MAX_ANGLE,
     ))
 
     speed_level = 5
@@ -309,14 +312,14 @@ def main(stdscr):
                     if w_pressed and not w_was_pressed:
                         servo_angle = clamp(
                             servo_angle + SERVO_STEP_ANGLE,
-                            SERVO_MIN_ANGLE,
-                            SERVO_MAX_ANGLE,
+                            SERVO_LIMIT_MIN_ANGLE,
+                            SERVO_LIMIT_MAX_ANGLE,
                         )
                     if s_pressed and not s_was_pressed:
                         servo_angle = clamp(
                             servo_angle - SERVO_STEP_ANGLE,
-                            SERVO_MIN_ANGLE,
-                            SERVO_MAX_ANGLE,
+                            SERVO_LIMIT_MIN_ANGLE,
+                            SERVO_LIMIT_MAX_ANGLE,
                         )
 
                     w_was_pressed = w_pressed
@@ -349,14 +352,14 @@ def main(stdscr):
                 elif key in (ord("w"), ord("W")):
                     servo_angle = clamp(
                         servo_angle + SERVO_STEP_ANGLE,
-                        SERVO_MIN_ANGLE,
-                        SERVO_MAX_ANGLE,
+                        SERVO_LIMIT_MIN_ANGLE,
+                        SERVO_LIMIT_MAX_ANGLE,
                     )
                 elif key in (ord("s"), ord("S")):
                     servo_angle = clamp(
                         servo_angle - SERVO_STEP_ANGLE,
-                        SERVO_MIN_ANGLE,
-                        SERVO_MAX_ANGLE,
+                        SERVO_LIMIT_MIN_ANGLE,
+                        SERVO_LIMIT_MAX_ANGLE,
                     )
                 elif key == -1:
                     if (
@@ -437,8 +440,8 @@ def main(stdscr):
                 "Servo: {0} st (krok {1}, min/max {2}/{3})                ".format(
                     robot.servo_angle,
                     SERVO_STEP_ANGLE,
-                    SERVO_MIN_ANGLE,
-                    SERVO_MAX_ANGLE,
+                    SERVO_LIMIT_MIN_ANGLE,
+                    SERVO_LIMIT_MAX_ANGLE,
                 ),
             )
 
