@@ -112,7 +112,8 @@ class DRV8825:
         self.set_step_pwm(frequency_hz)
 
 
-KEY_RELEASE_TIMEOUT = 0.08
+# Allow short input stalls (e.g. camera/RDP load) without dropping movement.
+KEY_RELEASE_TIMEOUT = 0.25
 MIN_STEP_FREQUENCY = 120
 # Practical max chosen from observed stable behavior: old level 6.
 MAX_STEP_FREQUENCY = 14243
@@ -121,10 +122,10 @@ RAMP_STEPS = 10
 RAMP_STEP_SECONDS = RAMP_UP_SECONDS / RAMP_STEPS
 
 SERVO_GPIO = 23
-SERVO_MIN_ANGLE = 90
-SERVO_MAX_ANGLE = 180
+SERVO_MIN_ANGLE = 95
+SERVO_MAX_ANGLE = 120
 SERVO_STEP_ANGLE = 5
-SERVO_START_ANGLE = 90
+SERVO_START_ANGLE = 100
 SERVO_MIN_PULSE_US = 500
 SERVO_MAX_PULSE_US = 2500
 
@@ -372,11 +373,18 @@ def main(stdscr):
                         motion_started_at = time.monotonic()
                     last_motion_key_at = time.monotonic()
             else:
-                if requested_motion != active_motion:
-                    active_motion = requested_motion
-                    motion_started_at = (
-                        None if requested_motion is None else time.monotonic()
-                    )
+                if requested_motion is not None:
+                    if requested_motion != active_motion:
+                        active_motion = requested_motion
+                        motion_started_at = time.monotonic()
+                    last_motion_key_at = time.monotonic()
+                elif (
+                    active_motion is not None
+                    and (time.monotonic() - last_motion_key_at)
+                    > KEY_RELEASE_TIMEOUT
+                ):
+                    active_motion = None
+                    motion_started_at = None
 
             if active_motion is None:
                 ramped_frequency = 0
