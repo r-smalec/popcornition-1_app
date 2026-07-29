@@ -298,9 +298,9 @@ def main(stdscr):
             if keyboard_hold_mode:
                 try:
                     if keyboard.is_pressed("up"):
-                        requested_motion = ("forward", "backward", "FORWARD")
+                        requested_motion = ("backward", "forward", "FORWARD")
                     elif keyboard.is_pressed("down"):
-                        requested_motion = ("backward", "forward", "BACKWARD")
+                        requested_motion = ("forward", "backward", "BACKWARD")
                     elif keyboard.is_pressed("left"):
                         requested_motion = ("backward", "backward", "LEFT")
                     elif keyboard.is_pressed("right"):
@@ -342,9 +342,9 @@ def main(stdscr):
                 )
             if not keyboard_hold_mode:
                 if key == curses.KEY_UP:
-                    requested_motion = ("forward", "backward", "FORWARD")
+                    requested_motion = ("backward", "forward", "FORWARD")
                 elif key == curses.KEY_DOWN:
-                    requested_motion = ("backward", "forward", "BACKWARD")
+                    requested_motion = ("forward", "backward", "BACKWARD")
                 elif key == curses.KEY_LEFT:
                     requested_motion = ("backward", "backward", "LEFT")
                 elif key == curses.KEY_RIGHT:
